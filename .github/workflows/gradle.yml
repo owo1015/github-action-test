@@ -59,10 +59,16 @@ jobs:
         script: |
           pgrep -f "java -jar" && kill -15 $(pgrep -f "java -jar") && sleep 5 || true
           JAR_FILE=$(ls -t ${{ secrets.EC2_TARGET_DIR }}/build/libs/*.jar | head -1)
+          echo "JAR file: $JAR_FILE"
+          echo "Java version:"
+          java -version 2>&1 || echo "Java not found"
+          chmod +x "$JAR_FILE"
           sudo nohup java -jar "$JAR_FILE" > ${{ secrets.EC2_TARGET_DIR }}/app.log 2>&1 &
-          sleep 3
+          sleep 5
           if pgrep -f "java -jar" > /dev/null; then
             echo "Deploy success: $JAR_FILE"
           else
-            echo "Deploy failed" && exit 1
+            echo "Deploy failed. App log:"
+            tail -30 ${{ secrets.EC2_TARGET_DIR }}/app.log
+            exit 1
           fi
