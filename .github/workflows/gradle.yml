@@ -58,8 +58,11 @@ jobs:
         script: |
           PID=$(pgrep -f "java -jar" || true)
           if [ -n "$PID" ]; then
-            kill -15 $PID
+            kill -15 $PID || true
             sleep 5
           fi
           JAR_FILE=$(ls -t ${{ secrets.EC2_TARGET_DIR }}/build/libs/*.jar | head -1)
           nohup java -jar "$JAR_FILE" > ${{ secrets.EC2_TARGET_DIR }}/app.log 2>&1 &
+          disown
+          sleep 2
+          echo "Deployed: $JAR_FILE"
