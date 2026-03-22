@@ -55,14 +55,14 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
+        script_stop: false
         script: |
-          PID=$(pgrep -f "java -jar" || true)
-          if [ -n "$PID" ]; then
-            kill -15 $PID || true
-            sleep 5
-          fi
+          pgrep -f "java -jar" && kill -15 $(pgrep -f "java -jar") && sleep 5 || true
           JAR_FILE=$(ls -t ${{ secrets.EC2_TARGET_DIR }}/build/libs/*.jar | head -1)
-          nohup java -jar "$JAR_FILE" > ${{ secrets.EC2_TARGET_DIR }}/app.log 2>&1 &
-          disown
-          sleep 2
-          echo "Deployed: $JAR_FILE"
+          sudo nohup java -jar "$JAR_FILE" > ${{ secrets.EC2_TARGET_DIR }}/app.log 2>&1 &
+          sleep 3
+          if pgrep -f "java -jar" > /dev/null; then
+            echo "Deploy success: $JAR_FILE"
+          else
+            echo "Deploy failed" && exit 1
+          fi
