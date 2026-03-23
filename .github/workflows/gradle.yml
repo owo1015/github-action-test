@@ -61,30 +61,31 @@ jobs:
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          # 현재 활성 컨테이너 확인 (blue or green)
-          if docker ps --format '{{.Names}}' | grep -q blue; then
-            CURRENT=blue
-            CURRENT_PORT=8081
-            NEW=green
-            NEW_PORT=8082
-          else
-            CURRENT=green
-            CURRENT_PORT=8082
-            NEW=blue
-            NEW_PORT=8081
-          fi
+          STABLE_PORT=8081
+          CANARY_PORT=8082
+          IMAGE=${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
 
           # 새 이미지 pull
           docker pull ${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
 
-          # 새 환경에 컨테이너 실행
-          docker stop $NEW || true
-          docker rm $NEW || true
-          docker run -d --name $NEW -p $NEW_PORT:8080 ${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
+          # canary가 존재하면 stable로 승격 후 새 canary 배포
+          if docker ps -a --format '{{.Names}}' | grep -q canary; then
+            CANARY_IMAGE=$(docker inspect --format='{{.Config.Image}}' canary)
+            docker stop stable || true
+            docker rm stable || true
+            docker stop canary || true
+            docker rm canary || true
+            docker run -d --name stable -p $STABLE_PORT:8080 $CANARY_IMAGE
+          fi
+
+          # 새 canary 컨테이너 실행
+          docker stop canary || true
+          docker rm canary || true
+          docker run -d --name canary -p $CANARY_PORT:8080 $IMAGE
 
           # 헬스 체크 (최대 30초 대기)
           for i in $(seq 1 10); do
-            if curl -s http://localhost:$NEW_PORT/health | grep -q UP; then
+            if curl -s http://localhost:$CANARY_PORT/health | grep -q UP; then
               echo "Health check passed"
               break
             fi
@@ -92,11 +93,11 @@ jobs:
             sleep 3
           done
 
-          # Nginx 카나리 설정 (기존 90%, 새 버전 10%)
+          # Nginx 카나리 설정 (stable 90%, canary 10%)
           sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
           upstream app {
-              server localhost:$CURRENT_PORT weight=9;
-              server localhost:$NEW_PORT weight=1;
+              server localhost:$STABLE_PORT weight=9;
+              server localhost:$CANARY_PORT weight=1;
           }
 
           server {
@@ -110,4 +111,4 @@ jobs:
           EOF
           sudo nginx -t && sudo nginx -s reload
 
-          echo "Canary deployed: $NEW (port $NEW_PORT) with 10% traffic"
+          echo "Canary deployed on port $CANARY_PORT with 10% traffic"
