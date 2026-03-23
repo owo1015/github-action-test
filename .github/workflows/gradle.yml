@@ -94,8 +94,7 @@ jobs:
           sudo sed -i "s/proxy_pass .*/proxy_pass http:\/\/localhost:$NEW_PORT;/" /etc/nginx/sites-available/default
           sudo nginx -s reload
 
-          # 이전 환경 종료
+          # 이전 환경 중지 (롤백 대비 컨테이너 유지)
           docker stop $CURRENT || true
-          docker rm $CURRENT || true
 
           echo "Deployed: $NEW (port $NEW_PORT)"
