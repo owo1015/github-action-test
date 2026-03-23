@@ -53,8 +53,8 @@ jobs:
     needs: build
 
     steps:
-    # 9. Blue/Green 배포
-    - name: Blue/Green Deploy on EC2
+    # 9. Canary 배포
+    - name: Canary Deploy on EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
@@ -64,10 +64,12 @@ jobs:
           # 현재 활성 컨테이너 확인 (blue or green)
           if docker ps --format '{{.Names}}' | grep -q blue; then
             CURRENT=blue
+            CURRENT_PORT=8081
             NEW=green
             NEW_PORT=8082
           else
             CURRENT=green
+            CURRENT_PORT=8082
             NEW=blue
             NEW_PORT=8081
           fi
@@ -90,11 +92,22 @@ jobs:
             sleep 3
           done
 
-          # Nginx 전환
-          sudo sed -i "s/proxy_pass .*/proxy_pass http:\/\/localhost:$NEW_PORT;/" /etc/nginx/sites-available/default
-          sudo nginx -s reload
+          # Nginx 카나리 설정 (기존 90%, 새 버전 10%)
+          sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
+          upstream app {
+              server localhost:$CURRENT_PORT weight=9;
+              server localhost:$NEW_PORT weight=1;
+          }
 
-          # 이전 환경 중지 (롤백 대비 컨테이너 유지)
-          docker stop $CURRENT || true
+          server {
+              listen 80;
+              location / {
+                  proxy_pass http://app;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+              }
+          }
+          EOF
+          sudo nginx -t && sudo nginx -s reload
 
-          echo "Deployed: $NEW (port $NEW_PORT)"
+          echo "Canary deployed: $NEW (port $NEW_PORT) with 10% traffic"
