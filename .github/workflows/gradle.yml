@@ -68,8 +68,8 @@ jobs:
           # 새 이미지 pull
           docker pull ${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
 
-          # canary가 존재하면 stable로 승격 후 새 canary 배포
-          if docker ps -a --format '{{.Names}}' | grep -q canary; then
+          # canary가 실행 중이면 stable로 승격 후 새 canary 배포
+          if docker ps --format '{{.Names}}' | grep -q canary; then
             CANARY_IMAGE_ID=$(docker inspect --format='{{.Image}}' canary)
             docker stop stable || true
             docker rm stable || true
