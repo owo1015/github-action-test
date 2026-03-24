@@ -53,62 +53,53 @@ jobs:
     needs: build
 
     steps:
-    # 9. Canary 배포
-    - name: Canary Deploy on EC2
+    # 9. Rolling 배포
+    - name: Rolling Deploy on EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          STABLE_PORT=8081
-          CANARY_PORT=8082
           IMAGE=${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
+          PORTS=(8081 8082 8083)
+          NAMES=(app-1 app-2 app-3)
 
           # 새 이미지 pull
-          docker pull ${{ secrets.DOCKER_USERNAME }}/github-action-test:latest
+          docker pull $IMAGE
 
-          # canary가 실행 중이면 stable로 승격 후 새 canary 배포
-          if docker ps --format '{{.Names}}' | grep -q canary; then
-            CANARY_IMAGE_ID=$(docker inspect --format='{{.Image}}' canary)
-            docker stop stable || true
-            docker rm stable || true
-            docker stop canary || true
-            docker rm canary || true
-            docker run -d --name stable -p $STABLE_PORT:8080 $CANARY_IMAGE_ID
-          fi
+          # 컨테이너를 하나씩 교체
+          for i in 0 1 2; do
+            NAME=${NAMES[$i]}
+            PORT=${PORTS[$i]}
 
-          # 새 canary 컨테이너 실행
-          docker stop canary || true
-          docker rm canary || true
-          docker run -d --name canary -p $CANARY_PORT:8080 $IMAGE
+            echo "Updating $NAME on port $PORT..."
 
-          # 헬스 체크 (최대 30초 대기)
-          for i in $(seq 1 10); do
-            if curl -s http://localhost:$CANARY_PORT/health | grep -q UP; then
-              echo "Health check passed"
-              break
-            fi
-            echo "Waiting... ($i)"
-            sleep 3
+            # 기존 컨테이너 중지 및 제거
+            docker stop $NAME || true
+            docker rm $NAME || true
+
+            # 새 버전으로 실행
+            docker run -d --name $NAME -p $PORT:8080 $IMAGE
+
+            # 헬스 체크 (최대 30초 대기)
+            for j in $(seq 1 10); do
+              if curl -s http://localhost:$PORT/health | grep -q UP; then
+                echo "$NAME health check passed"
+                break
+              fi
+              echo "Waiting for $NAME... ($j)"
+              sleep 3
+            done
+          
+            echo "$NAME updated"
+
+            # 모든 컨테이너 /health 결과 출력
+            echo "===== Health Check Results ====="
+            for k in 0 1 2; do
+              echo "${NAMES[$k]} (${PORTS[$k]}): $(curl -s http://localhost:${PORTS[$k]}/health)"
+            done
+            echo "================================"
           done
 
-          # Nginx 카나리 설정 (stable 90%, canary 10%)
-          sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
-          upstream app {
-              server localhost:$STABLE_PORT weight=9;
-              server localhost:$CANARY_PORT weight=1;
-          }
-
-          server {
-              listen 80;
-              location / {
-                  proxy_pass http://app;
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-              }
-          }
-          EOF
-          sudo nginx -t && sudo nginx -s reload
-
-          echo "Canary deployed on port $CANARY_PORT with 10% traffic"
+          echo "Rolling deploy complete"
