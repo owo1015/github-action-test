@@ -9,7 +9,7 @@ import java.util.Map;
 @RestController
 public class HealthController {
 
-    private static final String VERSION = "1.1.0";
+    private static final String VERSION = "1.2.0";
 
     @GetMapping("/health")
     public Map<String, String> health() {
